@@ -14,6 +14,16 @@
 #include "../common/TracyForceInline.hpp"
 #include "../common/TracyQueue.hpp"
 
+#define TRACY_ACCUMULATE_NON_REENTRANT_TOTAL_ZONE_TIME_ONLY
+
+constexpr bool AccumulateNonReentrantTotalZoneTimeOnly =
+#ifdef TRACY_ACCUMULATE_NON_REENTRANT_TOTAL_ZONE_TIME_ONLY
+    true
+#else // TRACY_ACCUMULATE_NON_REENTRANT_TOTAL_ZONE_TIME_ONLY
+    false
+#endif // TRACY_ACCUMULATE_NON_REENTRANT_TOTAL_ZONE_TIME_ONLY
+    ;
+
 namespace tracy
 {
 

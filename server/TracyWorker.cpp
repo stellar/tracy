@@ -3198,6 +3198,93 @@ ThreadData* Worker::NewThread( uint64_t thread )
     return td;
 }
 
+bool Worker::IsZoneReentry( const ZoneEvent& zone ) const
+{
+#ifndef TRACY_NO_STATISTICS
+    if( AreSourceLocationZonesReady() )
+    {
+        auto& slz = GetZonesForSourceLocation( zone.SrcLoc() );
+        if( !slz.zones.empty() )
+        {
+            auto it = std::lower_bound( slz.zones.begin(), slz.zones.end(), zone.Start(), [] ( const auto& lhs, const auto& rhs ) { return lhs.Zone()->Start() < rhs; } );
+            if( it != slz.zones.end() && it->Zone() == &zone )
+            {
+                return IsZoneReentry( zone, DecompressThread( it->Thread() ) );
+            }
+        }
+    }
+#endif
+
+    for( const auto& thread : GetThreadData() )
+    {
+        const ZoneEvent* parent = nullptr;
+        const Vector<short_ptr<ZoneEvent>>* timeline = &thread->timeline;
+        if( timeline->empty() ) continue;
+        for(;;)
+        {
+            if( timeline->is_magic() )
+            {
+                auto vec = (Vector<ZoneEvent>*)timeline;
+                auto it = std::upper_bound( vec->begin(), vec->end(), zone.Start(), [] ( const auto& l, const auto& r ) { return l < r.Start(); } );
+                if( it != vec->begin() ) --it;
+                if( zone.IsEndValid() && it->Start() > zone.End() ) break;
+                if( it == &zone ) return false;
+                if( !it->HasChildren() ) break;
+                parent = it;
+                if (parent->SrcLoc() == zone.SrcLoc() ) return true;
+                timeline = &GetZoneChildren( parent->Child() );
+            }
+            else
+            {
+                auto it = std::upper_bound( timeline->begin(), timeline->end(), zone.Start(), [] ( const auto& l, const auto& r ) { return l < r->Start(); } );
+                if( it != timeline->begin() ) --it;
+                if( zone.IsEndValid() && (*it)->Start() > zone.End() ) break;
+                if( *it == &zone ) return false;
+                if( !(*it)->HasChildren() ) break;
+                parent = *it;
+                if (parent->SrcLoc() == zone.SrcLoc() ) return true;
+                timeline = &GetZoneChildren( parent->Child() );
+            }
+        }
+    }
+    return false;
+}
+
+bool Worker::IsZoneReentry( const ZoneEvent& zone, uint64_t tid ) const
+{
+    const auto thread = GetThreadData( tid );
+    const ZoneEvent* parent = nullptr;
+    const Vector<short_ptr<ZoneEvent>>* timeline = &thread->timeline;
+    if( timeline->empty() ) return false;
+    for(;;)
+    {
+        if( timeline->is_magic() )
+        {
+            auto vec = (Vector<ZoneEvent>*)timeline;
+            auto it = std::upper_bound( vec->begin(), vec->end(), zone.Start(), [] ( const auto& l, const auto& r ) { return l < r.Start(); } );
+            if( it != vec->begin() ) --it;
+            if( zone.IsEndValid() && it->Start() > zone.End() ) break;
+            if( it == &zone ) return false;
+            if( !it->HasChildren() ) break;
+            parent = it;
+            if (parent->SrcLoc() == zone.SrcLoc() ) return true;
+            timeline = &GetZoneChildren( parent->Child() );
+        }
+        else
+        {
+            auto it = std::upper_bound( timeline->begin(), timeline->end(), zone.Start(), [] ( const auto& l, const auto& r ) { return l < r->Start(); } );
+            if( it != timeline->begin() ) --it;
+            if( zone.IsEndValid() && (*it)->Start() > zone.End() ) break;
+            if( *it == &zone ) return false;
+            if( !(*it)->HasChildren() ) break;
+            parent = *it;
+            if (parent->SrcLoc() == zone.SrcLoc() ) return true;
+            timeline = &GetZoneChildren( parent->Child() );
+        }
+    }
+    return false;
+}
+
 void Worker::NewZone( ZoneEvent* zone, uint64_t thread )
 {
     m_data.zonesCnt++;
@@ -4319,10 +4406,18 @@ void Worker::ProcessZoneEnd( const QueueZoneEnd& ev )
         auto& ztd = slz->zones.push_next();
         ztd.SetZone( zone );
         ztd.SetThread( CompressThread( m_threadCtx ) );
-        if( slz->min > timeSpan ) slz->min = timeSpan;
-        if( slz->max < timeSpan ) slz->max = timeSpan;
-        slz->total += timeSpan;
-        slz->sumSq += double( timeSpan ) * timeSpan;
+        const auto isReentry =
+            std::find_if( stack.begin(), stack.end(),
+                          [zone] (auto stackZone)
+                          { return stackZone->SrcLoc() == zone->SrcLoc(); }) !=
+            stack.end();
+        if ( !AccumulateNonReentrantTotalZoneTimeOnly || !isReentry )
+        {
+            if( slz->min > timeSpan ) slz->min = timeSpan;
+            if( slz->max < timeSpan ) slz->max = timeSpan;
+            slz->total += timeSpan;
+            slz->sumSq += double( timeSpan ) * timeSpan;
+        }
         const auto selfSpan = timeSpan - td->childTimeStack.back_and_pop();
         if( slz->selfMin > selfSpan ) slz->selfMin = selfSpan;
         if( slz->selfMax < selfSpan ) slz->selfMax = selfSpan;
@@ -6317,10 +6412,14 @@ void Worker::ReconstructZoneStatistics( ZoneEvent& zone, uint16_t thread )
         auto& ztd = slz.zones.push_next();
         ztd.SetZone( &zone );
         ztd.SetThread( thread );
-        if( slz.min > timeSpan ) slz.min = timeSpan;
-        if( slz.max < timeSpan ) slz.max = timeSpan;
-        slz.total += timeSpan;
-        slz.sumSq += double( timeSpan ) * timeSpan;
+        if ( !AccumulateNonReentrantTotalZoneTimeOnly ||
+             !IsZoneReentry ( zone ))
+        {
+            if( slz.min > timeSpan ) slz.min = timeSpan;
+            if( slz.max < timeSpan ) slz.max = timeSpan;
+            slz.total += timeSpan;
+            slz.sumSq += double( timeSpan ) * timeSpan;
+        }
         if( zone.HasChildren() )
         {
             auto& children = GetZoneChildren( zone.Child() );
