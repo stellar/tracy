@@ -11785,7 +11785,10 @@ void View::DrawStatistics()
                             if( start >= min && end <= max )
                             {
                                 const auto zt = end - start;
-                                total += zt;
+                                if (!AccumulateNonReentrantTotalZoneTimeOnly || !IsZoneReentry(z))
+                                {
+                                    total += zt;
+                                }
                                 if( m_statSelf ) selfTotal += zt - GetZoneChildTimeFast( z );
                                 cnt++;
                             }
@@ -11814,7 +11817,10 @@ void View::DrawStatistics()
                                 if( start >= min && end <= max )
                                 {
                                     const auto zt = end - start;
-                                    total += zt;
+                                    if (!AccumulateNonReentrantTotalZoneTimeOnly || !IsZoneReentry(z))
+                                    {
+                                        total += zt;
+                                    }
                                     if( m_statSelf ) selfTotal += zt - GetZoneChildTimeFast( z );
                                     cnt++;
                                 }
@@ -16686,6 +16692,16 @@ const ZoneEvent* View::GetZoneParent( const ZoneEvent& zone, uint64_t tid ) cons
         }
     }
     return nullptr;
+}
+
+bool View::IsZoneReentry( const ZoneEvent& zone ) const
+{
+    return m_worker.IsZoneReentry( zone );
+}
+
+bool View::IsZoneReentry( const ZoneEvent& zone, uint64_t tid ) const
+{
+    return m_worker.IsZoneReentry ( zone, tid );
 }
 
 const GpuEvent* View::GetZoneParent( const GpuEvent& zone ) const

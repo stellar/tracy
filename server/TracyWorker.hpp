@@ -540,6 +540,9 @@ public:
     tracy_force_inline const GhostKey& GetGhostFrame( const Int24& frame ) const { return m_data.ghostFrames[frame.Val()]; }
 #endif
 
+    bool IsZoneReentry( const ZoneEvent& zone ) const;
+    bool IsZoneReentry( const ZoneEvent& zone, uint64_t tid ) const;
+
     tracy_force_inline const bool HasZoneExtra( const ZoneEvent& ev ) const { return ev.extra != 0; }
     tracy_force_inline const ZoneExtra& GetZoneExtra( const ZoneEvent& ev ) const { return m_data.zoneExtra[ev.extra]; }
 
