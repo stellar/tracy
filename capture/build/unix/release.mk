@@ -1,4 +1,4 @@
-CFLAGS := -O3 -flto
+CFLAGS := -O3
 DEFINES := -DNDEBUG
 BUILD := release
 
